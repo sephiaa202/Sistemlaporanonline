@@ -15205,9 +15205,10 @@ window.exportCleanlinessExcel = function() {
 }
 </script>
 
-            <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-  import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
+       <script type="module">
+  // --- PERBAIKAN 1: MENGGUNAKAN VERSI FIREBASE YANG VALID (v10.7.1) ---
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
   // --- CONFIG FIREBASE ANDA ---
   const firebaseConfig = {
@@ -15220,9 +15221,17 @@ window.exportCleanlinessExcel = function() {
     appId: "1:69750485588:web:5f73609e227bfa4622b3c1"
   };
 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-  console.log("🔥 Sistem Online Aktif");
+  // Error Handling saat inisialisasi
+  let app, db;
+  try {
+      app = initializeApp(firebaseConfig);
+      db = getDatabase(app);
+      console.log("🔥 Firebase Berhasil Diinisialisasi");
+      if(typeof showToast === 'function') showToast("Koneksi", "Terhubung ke Database Cloud ☁️", "success");
+  } catch (error) {
+      console.error("Firebase Error:", error);
+      alert("Gagal terhubung ke Database Cloud. Aplikasi berjalan dalam mode Offline.");
+  }
 
   // ============================================================
   // A. MENERIMA DATA DARI CLOUD (LISTENER)
@@ -15230,15 +15239,22 @@ window.exportCleanlinessExcel = function() {
 
   // 1. Laporan Harian
   onValue(ref(db, 'laporan_harian'), (snapshot) => {
-      window.reportsData = snapshot.val() || [];
+      const val = snapshot.val();
+      // Cek apakah data valid array
+      window.reportsData = val ? Object.values(val) : []; 
+      
+      // Fix: Pastikan reportsData adalah array murni untuk filter
+      if (!Array.isArray(window.reportsData)) window.reportsData = [];
+
       if(typeof window.fetchReportData === 'function') window.fetchReportData();
-      console.log("Sync: Laporan Harian Updated");
+      console.log("Sync: Laporan Harian Updated", window.reportsData.length);
   });
 
   // 2. Master Unit & Operator
   onValue(ref(db, 'master_units'), (snapshot) => {
       window.masterUnits = snapshot.val() || {};
       window.masterOperators = [...new Set(Object.values(window.masterUnits).map(u => u.operator_default).filter(op => op))].sort();
+      
       if(typeof window.updateFilterUnitDropdown === 'function') window.updateFilterUnitDropdown();
       if(typeof window.updateOperatorDatalist === 'function') window.updateOperatorDatalist();
   });
@@ -15248,36 +15264,55 @@ window.exportCleanlinessExcel = function() {
       const data = snapshot.val();
       if(data) {
           window.triputraData = data.laporan || [];
+          // Fix: Pastikan array
+          if (!Array.isArray(window.triputraData) && typeof window.triputraData === 'object') {
+             window.triputraData = Object.values(window.triputraData);
+          }
+
           window.triputraFuelStock = parseFloat(data.stok || 0);
           window.triputraStockLog = data.log || [];
+          
           const elStock = document.getElementById('triputra_stock_display');
           if(elStock) elStock.textContent = Math.round(window.triputraFuelStock).toLocaleString('id-ID');
+          
           if(typeof window.fetchTriputraData === 'function') window.fetchTriputraData();
       }
   });
 
   // 4. Tracking BA
   onValue(ref(db, 'tracking_ba'), (snapshot) => {
-      window.trackingData = snapshot.val() || [];
+      const val = snapshot.val();
+      window.trackingData = val ? (Array.isArray(val) ? val : Object.values(val)) : [];
       if(typeof window.renderTrackingTable === 'function') window.renderTrackingTable();
   });
 
   // 5. Fuel Control
   onValue(ref(db, 'fuel_data'), (snapshot) => {
-      window.fuelData = snapshot.val() || [];
+      const val = snapshot.val();
+      window.fuelData = val ? (Array.isArray(val) ? val : Object.values(val)) : [];
       if(typeof window.renderFuelTable === 'function') window.renderFuelTable();
   });
 
   // 6. General Affair
   onValue(ref(db, 'ga_data'), (snapshot) => {
-      window.gaData = snapshot.val() || { documents: [], maintenance: [], requests: [], payments: [] };
+      const val = snapshot.val();
+      // Pastikan struktur default ada jika data cloud kosong sebagian
+      window.gaData = { 
+          documents: val?.documents || [], 
+          maintenance: val?.maintenance || [], 
+          requests: val?.requests || [], 
+          payments: val?.payments || [] 
+      };
+
       if(typeof window.updateGAKPI === 'function') window.updateGAKPI();
+      
+      // Refresh tabel yang sedang aktif
       const activeBtn = document.querySelector('.ga-sub-tab-btn.active');
-      if (activeBtn && typeof window.renderGADocsTable === 'function') {
-          if(activeBtn.innerText.includes('Legalitas')) window.renderGADocsTable();
-          if(activeBtn.innerText.includes('Maintenance')) window.renderGAMaintTable();
-          if(activeBtn.innerText.includes('Purchase')) window.renderGAReqTable();
-          if(activeBtn.innerText.includes('Payment')) window.renderGAPaymentHistory();
+      if (activeBtn) {
+          if(activeBtn.innerText.includes('Legalitas') && typeof window.renderGADocsTable === 'function') window.renderGADocsTable();
+          if(activeBtn.innerText.includes('Maintenance') && typeof window.renderGAMaintTable === 'function') window.renderGAMaintTable();
+          if(activeBtn.innerText.includes('Purchase') && typeof window.renderGAReqTable === 'function') window.renderGAReqTable();
+          if(activeBtn.innerText.includes('Payment') && typeof window.renderGAPaymentHistory === 'function') window.renderGAPaymentHistory();
       }
   });
 
@@ -15288,18 +15323,21 @@ window.exportCleanlinessExcel = function() {
   });
 
   // ============================================================
-  // B. MENGIRIM DATA KE CLOUD (OVERRIDE)
+  // B. MENGIRIM DATA KE CLOUD (OVERRIDE FUNGSI LOKAL)
   // ============================================================
 
   window.saveReportsDataToLocalStorage = function() {
+      // Menggunakan set() akan menimpa seluruh node 'laporan_harian'
       set(ref(db, 'laporan_harian'), window.reportsData)
-      .then(() => showToast("Online", "Laporan Tersimpan ✅", "success"))
-      .catch((e) => alert("Gagal Sync: " + e.message));
+      .then(() => {
+          if(typeof showToast === 'function') showToast("Cloud", "Laporan Tersimpan di Cloud ✅", "success");
+      })
+      .catch((e) => alert("Gagal Sync ke Cloud: " + e.message));
   };
 
   window.saveMasterDataToLocalStorage = function() {
       set(ref(db, 'master_units'), window.masterUnits)
-      .then(() => showToast("Online", "Master Unit Tersimpan ✅", "success"));
+      .then(() => { if(typeof showToast === 'function') showToast("Cloud", "Master Unit Updated ✅", "success"); });
   };
 
   window.saveTriputraData = function() {
@@ -15310,7 +15348,7 @@ window.exportCleanlinessExcel = function() {
       }).then(() => {
            const elStock = document.getElementById('triputra_stock_display');
            if(elStock) elStock.textContent = Math.round(window.triputraFuelStock).toLocaleString('id-ID');
-           showToast("Online", "Triputra Tersimpan ✅", "success");
+           if(typeof showToast === 'function') showToast("Cloud", "Triputra Updated ✅", "success");
       });
   };
 
@@ -15324,18 +15362,13 @@ window.exportCleanlinessExcel = function() {
 
   window.saveGAData = async function() {
       set(ref(db, 'ga_data'), window.gaData)
-      .then(() => { if(typeof updateGAKPI === 'function') updateGAKPI(); });
+      .then(() => { if(typeof updateGAKPI === 'function') window.updateGAKPI(); });
   };
 
   window.saveCleanlinessDataManual = async function() {
       set(ref(db, 'cleanliness_data'), window.cleanlinessScores)
-      .then(() => showToast("Online", "Nilai Tersimpan ✅", "success"));
+      .then(() => { if(typeof showToast === 'function') showToast("Cloud", "Nilai Tersimpan ✅", "success"); });
   };
 
-  setTimeout(() => {
-      if(typeof showToast === 'function') showToast("Koneksi", "Terhubung ke Database AUM ✅", "success");
-  }, 2000);
-
 </script>
-</body>
-</html>
+
